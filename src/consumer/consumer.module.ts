@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConsumerService } from './consumer.service';
-import { QueueModule } from 'src/queue/queue.module';
+import { QueueModule } from '../queue/queue.module';
+import { DbModule } from '../db/db.module';
+import { NotificationRepo } from '../repo/notification.repo';
 
 @Module({
-    imports: [QueueModule],
-    providers: [ConsumerService],
+  imports: [QueueModule, DbModule],
+  providers: [ConsumerService, NotificationRepo],
 })
-export class ConsumerModule { }
+export class ConsumerModule {}
