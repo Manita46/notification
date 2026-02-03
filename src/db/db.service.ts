@@ -23,7 +23,6 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     const conn = await this.pool.getConnection();
     await conn.ping();
     conn.release();
-
     this.logger.log('DB connected');
   }
 
@@ -31,7 +30,10 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     await this.pool?.end().catch(() => void 0);
   }
 
-  getPool() {
-    return this.pool;
+  getPool(): Pool {
+  if (!this.pool) {
+    throw new Error('DbService: pool not initialized yet');
   }
+  return this.pool;
+}
 }

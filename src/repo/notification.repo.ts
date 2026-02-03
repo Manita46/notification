@@ -4,13 +4,12 @@ import { DbService } from '../db/db.service';
 
 @Injectable()
 export class NotificationRepo {
-  private pool: Pool;
+  private readonly pool: Pool;
 
-  constructor(db: DbService) {
-    this.pool = db.getPool();
-  }
+  constructor(private readonly db: DbService) { }
 
   async getConfigsByEventType(eventTypeCode: string) {
+    const pool = this.db.getPool();
     const sql = `
       SELECT
           ne.event_type_code,
@@ -20,55 +19,61 @@ export class NotificationRepo {
           JSON_UNQUOTE(JSON_EXTRACT(nt.template, '$.body')) AS body,
           nr.recipients
       FROM notification_event ne
-      JOIN notification_channel nc ON nc.notification_event_id = ne.id
-      JOIN notification_recipient nr ON nr.notification_channel_id = nc.id
-      JOIN notification_template nt ON nt.id = nr.template_id
+      JOIN notification_channel nc
+          ON nc.notification_event_id = ne.id
+      JOIN notification_recipient nr
+          ON nr.notification_channel_id = nc.id
+      JOIN notification_template nt
+          ON nt.id = nr.template_id
       WHERE ne.event_type_code = ?;
     `;
-    const [rows] = await this.pool.query<any[]>(sql, [eventTypeCode]);
-    return rows;
+
+    try {
+      const [rows] = await pool.query<any[]>(sql, [eventTypeCode]);
+      return rows;
+    }
+    catch (error) {
+      console.log(error)
+      throw error
+    }
+
   }
 
-  async insertInboxFromConfigs(args: {
+  async insertInbox(args: {
     messageId: string | null;
     eventTypeCode: string;
     correlationId: string | null;
     payload: any;
     configs: any[];
   }) {
-    const conn = await this.pool.getConnection();
+    const pool = this.db.getPool();
+    const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
 
+      const mqMessageId =
+        args.messageId ?? `gen:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+
       const insertSql = `
         INSERT INTO event_inbox
-          (message_id, event_type_code, channel, template_type, subject, recipients, payload, ref_id, received_at)
+          (message_id, event_type_code, channel, template_type, subject, recipients, correlation_id, payload, received_at)
         VALUES ?
       `;
 
-      const baseId = args.messageId ?? `gen:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-
-      const values = args.configs.map((c) => {
-        // กันชน unique ถ้า inbox message_id ต้อง unique
-        const inboxMessageId = `${baseId}:${c.channel}:${c.template_type}`;
-
-        return [
-          inboxMessageId,
-          args.eventTypeCode,
-          c.channel,
-          c.template_type,
-          c.subject,
-          JSON.stringify(c.recipients ?? null),
-          JSON.stringify(args.payload ?? null),
-          args.correlationId,
-          // received_at ใช้ใน SQL เป็น NOW() ไม่ได้เพราะ bulk VALUES ? เลยใส่เป็น Date
-          new Date(),
-        ];
-      });
+      const values = args.configs.map((c, idx) => [
+        `${mqMessageId}:${idx}`,
+        args.eventTypeCode,
+        c.channel,
+        c.template_type,
+        c.subject,
+        JSON.stringify(c.recipients ?? null),
+        args.correlationId ?? null, 
+        JSON.stringify(args.payload ?? null),
+        new Date(),
+      ]);
 
       await conn.query(insertSql, [values]);
       await conn.commit();
-      return { inserted: values.length };
     } catch (e) {
       await conn.rollback();
       throw e;
