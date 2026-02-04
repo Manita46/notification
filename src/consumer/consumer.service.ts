@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { QueueService } from '../queue/queue.service';
 import { NotificationRepo } from '../repo/notification.repo';
+import { NotificationDeliveryRepo } from 'src/repo/notification-delivery.repo';
 
 type IncomingMessage = {
   eventType: string;
@@ -29,6 +30,7 @@ export class ConsumerService implements OnModuleInit {
   constructor(
     private readonly queue: QueueService,
     private readonly repo: NotificationRepo,
+    private readonly deliveryRepo: NotificationDeliveryRepo,
   ) { }
 
   async onModuleInit() {
@@ -52,6 +54,7 @@ export class ConsumerService implements OnModuleInit {
       const messageId = body.messageId ?? null;
 
       try {
+        // this.logger.log(`consume messageId=${body?.messageId ?? '-'} eventType=${eventTypeCode}`);
         const configs = await this.repo.getConfigsByEventType(eventTypeCode);
 
         if (!configs.length) {
@@ -60,7 +63,7 @@ export class ConsumerService implements OnModuleInit {
           return;
         }
 
-        await this.repo.insertInbox({
+        const inboxIds = await this.repo.insertInbox({
           messageId,
           eventTypeCode,
           correlationId,

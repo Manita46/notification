@@ -25,8 +25,12 @@ export class NotificationRepo {
           ON nr.notification_channel_id = nc.id
       JOIN notification_template nt
           ON nt.id = nr.template_id
-      WHERE ne.event_type_code = ?;
+      WHERE ne.event_type_code = 'BILLING_CALCULATED';
     `;
+
+    // console.log('[SQL]', sql.trim());
+    // const [rows] = await pool.query<any[]>(sql);
+    // console.log('[ROWS]', rows.length);
 
     try {
       const [rows] = await pool.query<any[]>(sql, [eventTypeCode]);
@@ -52,7 +56,8 @@ export class NotificationRepo {
       await conn.beginTransaction();
 
       const mqMessageId =
-        args.messageId ?? `gen:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+        args.messageId;
+      // ?? `gen:${Date.now()}:${Math.random().toString(16).slice(2)}`;
 
       const insertSql = `
         INSERT INTO event_inbox
@@ -67,7 +72,7 @@ export class NotificationRepo {
         c.template_type,
         c.subject,
         JSON.stringify(c.recipients ?? null),
-        args.correlationId ?? null, 
+        args.correlationId ?? null,
         JSON.stringify(args.payload ?? null),
         new Date(),
       ]);
