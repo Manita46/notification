@@ -1,25 +1,13 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as amqp from 'amqplib';
-
-export type ConsumeContext = {
-  raw: string;
-  body: any; 
-  properties: amqp.MessageProperties;
-  fields: amqp.MessageFields;
-  ack: () => void;
-  nack: (requeue?: boolean) => void;
-};
+import { connect, Connection, Channel, ConsumeMessage } from 'amqplib';
+import { ConsumeHandler } from './queue.types';
 
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
-
-  private connection?: amqp.Connection;
-  private channel?: amqp.Channel;
-
-  private exchange!: string;
-  private queue!: string;
+  private connection!: Connection;
+  private channel!: Channel;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -27,79 +15,54 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const url = this.config.get<string>('MQ_URL');
     if (!url) throw new Error('MQ_URL is missing');
 
-    this.exchange = this.config.get<string>('MQ_EXCHANGE', 'bms.noti');
-
-    const type = this.config.get<string>('MQ_EXCHANGE_TYPE', 'topic') as
+    const exchange = this.config.get<string>('MQ_EXCHANGE', 'bms.noti');
+    const exchangeType = this.config.get<string>('MQ_EXCHANGE_TYPE', 'topic') as
       | 'topic'
       | 'direct'
       | 'fanout'
       | 'headers';
 
-    this.queue = this.config.get<string>('MQ_QUEUE')!;
-    if (!this.queue) throw new Error('MQ_QUEUE is missing');
+    const queue = this.config.get<string>('MQ_QUEUE');
 
-    const keysRaw = this.config.get<string>('MQ_ROUTING_KEYS', '#');
-    const routingKeys = keysRaw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    this.logger.log(`Connecting MQ...`);
-    this.connection = await amqp.connect(url);
+    this.logger.log('Connecting MQ...');
+    this.connection = await connect(url);
     this.channel = await this.connection.createChannel();
 
-    await this.channel.assertExchange(this.exchange, type, { durable: true });
-    await this.channel.assertQueue(this.queue, { durable: true });
+    await this.channel.assertExchange(exchange, exchangeType, { durable: true });
+    await this.channel.assertQueue(queue, { durable: true });
 
-    for (const key of routingKeys) {
-      await this.channel.bindQueue(this.queue, this.exchange, key);
-      this.logger.log(`Bind: ${this.queue} <- ${this.exchange} (${key})`);
-    }
+    await this.channel.bindQueue(queue, exchange, '#');
 
+    this.logger.log(`MQ connected Bind: ${queue} <- ${exchange} (#)`);
+  }
+
+  async consume(handler: ConsumeHandler) {
+    const queue = this.config.get<string>('MQ_QUEUE', 'notification.queue');
+    this.logger.log(`Consuming queue "${queue}"...`);
+
+    await this.channel.consume(queue, async (msg: ConsumeMessage | null) => {
+      if (!msg) return;
+
+      const raw = msg.content.toString('utf8');
+
+      let body: any | null = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        body = null;
+      }
+
+      const ack = () => this.channel.ack(msg);
+      const nack = (requeue = true) => this.channel.nack(msg, false, requeue);
+
+      await handler({ raw, body, ack, nack });    
+    });
   }
 
   async onModuleDestroy() {
     try {
       await this.channel?.close();
       await this.connection?.close();
-      this.logger.log('MQ connection closed.');
-    } catch (e) {
-      this.logger.warn(`Error closing MQ: ${(e as Error).message}`);
-    }
-  }
-
-  async consume(handler: (ctx: ConsumeContext) => Promise<void> | void) {
-    if (!this.channel) throw new Error('MQ channel not initialized');
-
-    this.logger.log(`Consuming queue "${this.queue}"...`);
-
-    await this.channel.consume(
-      this.queue,
-      async (msg) => {
-        if (!msg) return;
-
-        const raw = msg.content.toString('utf8');
-
-        const ack = () => this.channel!.ack(msg);
-        const nack = (requeue = false) => this.channel!.nack(msg, false, requeue);
-
-        let body: any = null;
-        try {
-          body = JSON.parse(raw);
-        } catch {
-          body = null;
-        }
-
-        await handler({
-          raw,
-          body,
-          properties: msg.properties,
-          fields: msg.fields,
-          ack,
-          nack,
-        });
-      },
-      { noAck: false },
-    );
+    } catch {}
   }
 }

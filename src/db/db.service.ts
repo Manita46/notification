@@ -23,17 +23,15 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     const conn = await this.pool.getConnection();
     await conn.ping();
     conn.release();
+
     this.logger.log('DB connected');
+  }
+
+  getPool() {
+    return this.pool;
   }
 
   async onModuleDestroy() {
     await this.pool?.end().catch(() => void 0);
   }
-
-  getPool(): Pool {
-  if (!this.pool) {
-    throw new Error('DbService: pool not initialized yet');
-  }
-  return this.pool;
-}
 }
