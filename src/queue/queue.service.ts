@@ -1,13 +1,17 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { connect, Connection, Channel, ConsumeMessage } from 'amqplib';
+import * as amqp from 'amqplib';
 import { ConsumeHandler } from './queue.types';
 
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
-  private connection!: Connection;
-  private channel!: Channel;
+
+  private connection?: amqp.ChannelModel;
+  private channel?: amqp.Channel;
+
+  private exchange!: string;
+  private queue!: string;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -15,7 +19,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     const url = this.config.get<string>('MQ_URL');
     if (!url) throw new Error('MQ_URL is missing');
 
-    const exchange = this.config.get<string>('MQ_EXCHANGE', 'bms.noti');
+    this.exchange = this.config.get<string>('MQ_EXCHANGE', 'bms.noti');
+
     const exchangeType = this.config.get<string>('MQ_EXCHANGE_TYPE', 'topic') as
       | 'topic'
       | 'direct'
@@ -23,46 +28,55 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       | 'headers';
 
     const queue = this.config.get<string>('MQ_QUEUE');
+    if (!queue) throw new Error('MQ_QUEUE is missing');
+    this.queue = queue;
 
     this.logger.log('Connecting MQ...');
-    this.connection = await connect(url);
+    this.connection = await amqp.connect(url);
     this.channel = await this.connection.createChannel();
 
-    await this.channel.assertExchange(exchange, exchangeType, { durable: true });
-    await this.channel.assertQueue(queue, { durable: true });
+    await this.channel.assertExchange(this.exchange, exchangeType, { durable: true });
+    await this.channel.assertQueue(this.queue, { durable: true });
 
-    await this.channel.bindQueue(queue, exchange, '#');
+    // ฟังทุก routing key
+    await this.channel.bindQueue(this.queue, this.exchange, '#');
 
-    this.logger.log(`MQ connected Bind: ${queue} <- ${exchange} (#)`);
+    this.logger.log(`MQ connected Bind: ${this.queue} <- ${this.exchange} (#)`);
   }
 
   async consume(handler: ConsumeHandler) {
-    const queue = this.config.get<string>('MQ_QUEUE', 'notification.queue');
-    this.logger.log(`Consuming queue "${queue}"...`);
+    if (!this.channel) throw new Error('MQ channel not initialized');
 
-    await this.channel.consume(queue, async (msg: ConsumeMessage | null) => {
-      if (!msg) return;
+    this.logger.log(`Consuming queue "${this.queue}"...`);
 
-      const raw = msg.content.toString('utf8');
+    await this.channel.consume(
+      this.queue,
+      async (msg: amqp.ConsumeMessage | null) => {
+        if (!msg) return;
 
-      let body: any | null = null;
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        body = null;
-      }
+        const raw = msg.content.toString('utf8');
 
-      const ack = () => this.channel.ack(msg);
-      const nack = (requeue = true) => this.channel.nack(msg, false, requeue);
+        let body: any | null = null;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          body = null;
+        }
 
-      await handler({ raw, body, ack, nack });    
-    });
+        const ack = () => this.channel!.ack(msg);
+        const nack = (requeue = true) => this.channel!.nack(msg, false, requeue);
+
+        await handler({ raw, body, ack, nack });
+      },
+      { noAck: false },
+    );
   }
 
   async onModuleDestroy() {
     try {
       await this.channel?.close();
       await this.connection?.close();
+      this.logger.log('MQ connection closed.');
     } catch {}
   }
 }
