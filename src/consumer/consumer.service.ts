@@ -9,22 +9,22 @@ export class ConsumerService implements OnModuleInit {
   constructor(
     private readonly queue: QueueService,
     private readonly processor: NotificationProcessorService,
-  ) {}
+  ) { }
 
   async onModuleInit() {
-    await this.queue.consume(async ({ body, raw, ack, nack }) => {
-      if (!body) {
-        this.logger.warn(`non-json -> ack raw=${raw}`);
-        ack();
-        return;
-      }
-
+    await this.queue.consume(async ({ raw, body, ack, nack }) => {
       try {
         await this.processor.process(body);
-        ack();
-      } catch (e: any) {
-        this.logger.error(`process error -> requeue: ${e?.message ?? e}`);
-        nack(true);
+        ack(); 
+      } catch (err: any) {
+        if (err?.code === 'ER_DUP_ENTRY') {
+          this.logger.warn(`duplicate -> ack. ${err.message}`);
+          ack(); 
+          return;
+        }
+
+        this.logger.error(`process error -> requeue: ${err?.message ?? err}`);
+        nack(true); 
       }
     });
   }

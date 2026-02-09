@@ -3,7 +3,7 @@ import { DbService } from '../db/db.service';
 
 @Injectable()
 export class NotificationRepo {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService) { }
 
   async getConfigsByEventType(eventTypeCode: string) {
     const pool = this.db.getPool();
@@ -17,9 +17,12 @@ export class NotificationRepo {
         JSON_UNQUOTE(JSON_EXTRACT(nt.template, '$.body')) AS body,
         nr.recipients
       FROM notification_event ne
-      JOIN notification_channel nc ON nc.notification_event_id = ne.id
-      JOIN notification_recipient nr ON nr.notification_channel_id = nc.id
-      JOIN notification_template nt ON nt.id = nr.template_id
+      JOIN notification_channel nc 
+        ON nc.notification_event_id = ne.id
+      JOIN notification_recipient nr 
+        ON nr.notification_channel_id = nc.id
+      JOIN notification_template nt 
+        ON nt.id = nr.template_id
       WHERE ne.event_type_code = ?;
     `;
 
@@ -40,6 +43,8 @@ export class NotificationRepo {
     try {
       await conn.beginTransaction();
 
+
+
       const insertSql = `
         INSERT INTO event_inbox
           (message_id, event_type_code, channel, template_type, subject, recipients, correlation_id, payload, received_at)
@@ -48,9 +53,10 @@ export class NotificationRepo {
 
       const ids: number[] = [];
 
-      for (const c of args.configs) {
-        // message_id ใน table UNIQUE → ต้อง unique ต่อแถว
-        const msgIdForRow = `${args.messageId}:${c.channel}:${c.template_type}`;
+      for (let i = 0; i < args.configs.length; i++) {
+        const c = args.configs[i];
+
+        const msgIdForRow = args.messageId;
 
         const [result]: any = await conn.query(insertSql, [
           msgIdForRow,

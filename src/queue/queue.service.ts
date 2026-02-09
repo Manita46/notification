@@ -38,7 +38,6 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.channel.assertExchange(this.exchange, exchangeType, { durable: true });
     await this.channel.assertQueue(this.queue, { durable: true });
 
-    // ฟังทุก routing key
     await this.channel.bindQueue(this.queue, this.exchange, '#');
 
     this.logger.log(`MQ connected Bind: ${this.queue} <- ${this.exchange} (#)`);

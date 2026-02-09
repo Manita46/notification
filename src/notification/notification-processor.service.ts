@@ -30,7 +30,6 @@ export class NotificationProcessorService {
   private pickRecipient(recipientsJson: any, channel: string): string | null {
     if (!recipientsJson || typeof recipientsJson !== 'object') return null;
 
-    // { Finance: { Email: "...", Line: "..." } }
     for (const roleKey of Object.keys(recipientsJson)) {
       const obj = recipientsJson[roleKey];
       if (obj && typeof obj === 'object' && obj[channel]) {
@@ -41,7 +40,7 @@ export class NotificationProcessorService {
   }
 
   async process(body: any) {
-    // validation ขั้นต่ำ (ยังไม่ทำ DLQ)
+    // validation (ยังไม่ทำ DLQ)
     if (!isValidIncoming(body)) {
       this.logger.warn(`invalid payload -> skip. body=${JSON.stringify(body)}`);
       return;
@@ -69,18 +68,24 @@ export class NotificationProcessorService {
       configs,
     });
 
-    // เทส: insert log ต่อเลย (ยังไม่ได้ส่งจริง)
     for (let i = 0; i < inboxIds.length; i++) {
       const cfg = configs[i];
-      const recipientStr = this.pickRecipient(cfg.recipients, cfg.channel);
+      const isInApp = cfg.channel === 'In-app';
 
-      await this.repo.insertDeliveryLog({
-        eventInboxId: inboxIds[i],
-        channel: cfg.channel,
-        recipient: recipientStr ?? '-',
-        sendStatus: recipientStr ? 'SUCCESS' : 'FAILED',
-        errorMessage: recipientStr ? null : `recipient not found for channel=${cfg.channel}`,
-      });
+const recipientStr = isInApp
+  ? '-'                         // in-app ไม่ต้องหา recipient
+  : this.pickRecipient(cfg.recipients, cfg.channel);
+
+await this.repo.insertDeliveryLog({
+  eventInboxId: inboxIds[i],
+  channel: cfg.channel,
+  recipient: recipientStr ?? '-',
+  sendStatus: isInApp || recipientStr ? 'SUCCESS' : 'FAILED',
+  errorMessage:
+    isInApp || recipientStr
+      ? null
+      : `recipient not found for channel=${cfg.channel}`,
+});
     }
 
     this.logger.log(`done inbox=${inboxIds.length} log=${inboxIds.length}`);
