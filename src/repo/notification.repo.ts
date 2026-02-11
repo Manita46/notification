@@ -56,7 +56,7 @@ export class NotificationRepo {
       const insertSql = `
         INSERT INTO event_inbox
           (message_id, event_type_code, channel, template_type, subject, recipients, correlation_id, payload, received_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW());
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP());
       `;
 
       const ids: number[] = [];
@@ -102,7 +102,7 @@ export class NotificationRepo {
     const sql = `
       INSERT INTO notification_delivery_log
         (event_inbox_id, channel, recipient, send_status, error_message, sent_at)
-      VALUES (?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP());
     `;
 
     await pool.query(sql, [
@@ -162,10 +162,10 @@ export class NotificationRepo {
         subject,
         recipients,
         correlation_id,
-        received_at
+        DATE_FORMAT(received_at, '%Y-%m-%dT%H:%i:%s.000Z') AS received_at
       FROM event_inbox
       ${whereClause}
-      ORDER BY received_at ASC, id ASC
+      ORDER BY id ASC
       LIMIT ? OFFSET ?;
       `,
       [...values, limit, offset],
